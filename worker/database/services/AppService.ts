@@ -432,17 +432,25 @@ export class AppService extends BaseService {
      * Check if user owns an app and get visibility
      */
     async checkAppOwnership(appId: string, userId: string): Promise<OwnershipResult> {
-        // Use read replica for ownership checks
-        const readDb = this.getReadDb('fast');
-        const app = await readDb
-            .select({
-                id: schema.apps.id,
-                userId: schema.apps.userId,
-                visibility: schema.apps.visibility
-            })
-            .from(schema.apps)
-            .where(eq(schema.apps.id, appId))
-            .get();
+        const selectOwnership = (readDb: ReturnType<typeof this.getReadDb>) =>
+            readDb
+                .select({
+                    id: schema.apps.id,
+                    userId: schema.apps.userId,
+                    visibility: schema.apps.visibility
+                })
+                .from(schema.apps)
+                .where(eq(schema.apps.id, appId))
+                .get();
+
+        // Ownership checks gate websocket ticket issuance and other mutations.
+        // Prefer a fresh read so newly created apps are visible immediately.
+        let app = await selectOwnership(this.getReadDb('fresh'));
+
+        // Fall back to the default path if the primary/fresh read still misses.
+        if (!app) {
+            app = await selectOwnership(this.getReadDb('fast'));
+        }
 
         if (!app) {
             return { exists: false, isOwner: false };
