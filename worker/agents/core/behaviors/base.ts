@@ -602,7 +602,21 @@ export abstract class BaseCodingBehavior<TState extends BaseProjectState>
             if (templateDetails?.renderMode === 'browser') {
                 analysisResponse = await this.runInMemoryAnalysis(files);
             } else {
-                analysisResponse = await this.deploymentManager.runStaticAnalysis(files);
+                try {
+                    analysisResponse = await this.deploymentManager.runStaticAnalysis(files);
+                } catch (sandboxErr) {
+                    const msg = sandboxErr instanceof Error ? sandboxErr.message : String(sandboxErr);
+                    // Lint runs during early phases before deployToSandbox() has created an instance — was a hard error + scary UI.
+                    if (msg.includes('No sandbox instance available for static analysis')) {
+                        this.logger.warn(
+                            'Sandbox not provisioned yet; using in-memory static analysis until preview deploy completes',
+                            { detail: msg }
+                        );
+                        analysisResponse = await this.runInMemoryAnalysis(files);
+                    } else {
+                        throw sandboxErr;
+                    }
+                }
             }
 
             // Only cache full (unscoped) analysis results
